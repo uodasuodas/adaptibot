@@ -1,0 +1,11 @@
+path: /Users/tomas.komar/digitecus/fotos/dataset
+train: images/train
+val: images/val
+names:
+  0: any/unknown
+  1: can
+  2: duck
+  3: cup
+  4: sponge
+  5: ball
+  6: vegetable
