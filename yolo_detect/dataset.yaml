@@ -1,4 +1,4 @@
-path: /Users/tomas.komar/digitecus/fotos/dataset
+path: /home/ut-ai/ai-works/adaptibot/yolo_detect/dataset
 train: images/train
 val: images/val
 names:
