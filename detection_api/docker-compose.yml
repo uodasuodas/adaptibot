@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  detection-api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../yolo_detect/runs/stereo_objects5/weights:/app/weights:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

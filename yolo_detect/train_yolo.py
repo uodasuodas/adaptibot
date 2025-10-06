@@ -2,8 +2,8 @@ import os
 import torch
 from ultralytics import YOLO
 
-DATA_YAML = "/Users/tomas.komar/digitecus/fotos/dataset.yaml"
-RUNS_DIR = "/Users/tomas.komar/digitecus/fotos/runs"
+DATA_YAML = "/home/ut-ai/ai-works/adaptibot/yolo_detect/dataset.yaml"
+RUNS_DIR = "/home/ut-ai/ai-works/adaptibot/yolo_detect/runs"
 MODEL_NAME = "yolov8n.pt"
 
 

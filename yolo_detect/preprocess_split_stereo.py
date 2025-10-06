@@ -3,8 +3,8 @@ import cv2
 from glob import glob
 from tqdm import tqdm
 
-RAW_DIR = "/Users/tomas.komar/digitecus/fotos/raw"
-OUT_DIR = "/Users/tomas.komar/digitecus/fotos/processed/images"
+RAW_DIR = "/home/ut-ai/ai-works/adaptibot/yolo_detect/raw/Zed foto"
+OUT_DIR = "/home/ut-ai/ai-works/adaptibot/yolo_detect/processed/images"
 
 
 def ensure_dir(path: str) -> None:
