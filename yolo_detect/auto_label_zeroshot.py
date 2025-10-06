@@ -324,7 +324,7 @@ def process_split_parallel(split_name: str, files: List[str], im_out: str, lbl_o
 	if not files:
 		return
 	
-	print(f"\n🚀 Processing {split_name} split: {len(files)} images using {NUM_GPUS} GPUs")
+	print(f"\n Processing {split_name} split: {len(files)} images using {NUM_GPUS} GPUs")
 	start_time = time.time()
 	
 	# Create batches for parallel processing
@@ -366,7 +366,7 @@ def process_split_parallel(split_name: str, files: List[str], im_out: str, lbl_o
 				print(f"GPU {gpu_id}: Batch {batch_idx} failed: {e}")
 	
 	# Save all results
-	print(f"💾 Saving results for {split_name} split...")
+	print(f" Saving results for {split_name} split...")
 	for img_path, lines, colors in all_results:
 		# Copy image
 		basename = os.path.basename(img_path)
@@ -386,29 +386,29 @@ def process_split_parallel(split_name: str, files: List[str], im_out: str, lbl_o
 	
 	total_time = time.time() - start_time
 	avg_rate = len(files) / total_time if total_time > 0 else 0
-	print(f"✅ {split_name} split complete: {len(files)} images in {total_time:.1f}s ({avg_rate:.1f} img/s)")
+	print(f" {split_name} split complete: {len(files)} images in {total_time:.1f}s ({avg_rate:.1f} img/s)")
 
 
 def main():
 	"""Main function with multi-GPU parallel processing"""
-	print("🚀 Starting Multi-GPU Auto-Labeling")
-	print(f"💾 Dataset directory: {DATASET_DIR}")
-	print(f"🖼️  Images directory: {IMAGES_DIR}")
-	print(f"🔧 Available GPUs: {NUM_GPUS}")
+	print(" Starting Multi-GPU Auto-Labeling")
+	print(f" Dataset directory: {DATASET_DIR}")
+	print(f"  Images directory: {IMAGES_DIR}")
+	print(f" Available GPUs: {NUM_GPUS}")
 	
 	# Use optimal batch size based on GPU memory
 	optimal_batch_size = get_optimal_batch_size()
 	global BATCH_SIZE_PER_GPU
 	BATCH_SIZE_PER_GPU = optimal_batch_size
 	
-	print(f"⚙️  Optimal batch size per GPU: {BATCH_SIZE_PER_GPU}")
-	print(f"👥 Max workers: {MAX_WORKERS}")
+	print(f"  Optimal batch size per GPU: {BATCH_SIZE_PER_GPU}")
+	print(f" Max workers: {MAX_WORKERS}")
 	
 	if torch.cuda.is_available():
 		for i in range(NUM_GPUS):
 			gpu_name = torch.cuda.get_device_name(i)
 			gpu_memory = torch.cuda.get_device_properties(i).total_memory / (1024**3)
-			print(f"🎮 GPU {i}: {gpu_name} ({gpu_memory:.1f}GB)")
+			print(f" GPU {i}: {gpu_name} ({gpu_memory:.1f}GB)")
 	
 	start_time = time.time()
 	ensure_dirs()
@@ -416,14 +416,14 @@ def main():
 	# Get all image files
 	image_files = sorted(glob(os.path.join(IMAGES_DIR, "*.png")))
 	if not image_files:
-		print(f"❌ No PNG images found in {IMAGES_DIR}")
+		print(f" No PNG images found in {IMAGES_DIR}")
 		return
 	
-	print(f"📊 Found {len(image_files)} images to process")
+	print(f" Found {len(image_files)} images to process")
 	
 	# Split into train/val
 	train_files, val_files = split_train_val(image_files)
-	print(f"📂 Train: {len(train_files)} images, Val: {len(val_files)} images")
+	print(f" Train: {len(train_files)} images, Val: {len(val_files)} images")
 	
 	# Process each split in parallel
 	splits = [
@@ -439,10 +439,10 @@ def main():
 	total_images = len(image_files)
 	avg_rate = total_images / total_time if total_time > 0 else 0
 	
-	print(f"\n🎉 Auto-labeling complete!")
-	print(f"📊 Total: {total_images} images in {total_time:.1f}s ({avg_rate:.1f} img/s)")
-	print(f"💾 Dataset saved to: {DATASET_DIR}")
-	print(f"🚀 Speedup achieved with {NUM_GPUS} GPUs!")
+	print(f"\n Auto-labeling complete!")
+	print(f" Total: {total_images} images in {total_time:.1f}s ({avg_rate:.1f} img/s)")
+	print(f" Dataset saved to: {DATASET_DIR}")
+	print(f" Speedup achieved with {NUM_GPUS} GPUs!")
 
 
 if __name__ == "__main__":

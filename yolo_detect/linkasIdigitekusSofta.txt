@@ -1,1 +1,0 @@
-/home/ut-ai/OF/apps/myApps/digitecus_arm_control/bin

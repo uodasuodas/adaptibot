@@ -22,7 +22,7 @@ COPY app.py color_utils.py ./
 # Create weights directory
 RUN mkdir -p /app/weights
 
-# Expose port
+# Expose portdock
 EXPOSE 8000
 
 # Set environment variable to use headless OpenCV

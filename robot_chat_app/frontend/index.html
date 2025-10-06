@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robot control chat</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Robot control chat</h1>
+            <div class="status">
+                <span class="status-indicator" id="robotStatus">●</span>
+                <span id="statusText">Connecting...</span>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <div class="left-panel">
+                <div class="objects-panel">
+                    <div class="panel-header">
+                        <h2>Detected objects</h2>
+                        <button id="refreshBtn" class="refresh-btn">Refresh</button>
+                    </div>
+                    <div id="objectsList" class="objects-list">
+                        <p class="no-objects">No objects detected</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chat-panel">
+                <div id="chatMessages" class="chat-messages"></div>
+                <div class="chat-input-container">
+                    <button id="voiceBtn" class="voice-btn" title="Click to speak">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                            <line x1="12" y1="19" x2="12" y2="23"></line>
+                            <line x1="8" y1="23" x2="16" y2="23"></line>
+                        </svg>
+                    </button>
+                    <input 
+                        type="text" 
+                        id="chatInput" 
+                        placeholder="Type a command or click microphone to speak"
+                        autocomplete="off"
+                    >
+                    <button id="sendBtn">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
+
