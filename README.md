@@ -1,466 +1,222 @@
-# AdaptiBot Object Detection Pipeline
+# AdaptiBot
 
-A complete pipeline for automated stereo camera object detection with color analysis, featuring zero-shot auto-labeling, YOLO training, and a containerized inference API.
+AI-powered robot control system with object detection and natural language interface.
 
 ## Table of Contents
 
 1. [Overview](#overview)
 2. [Quick Start](#quick-start)
-3. [Detection API](#detection-api)
-4. [Auto Data Labeling](#auto-data-labeling)
-5. [YOLO Training](#yolo-training)
+3. [Robot Chat App](#robot-chat-app)
+4. [Detection API](#detection-api)
+5. [Training Pipeline](#training-pipeline)
 6. [Project Structure](#project-structure)
-7. [Troubleshooting](#troubleshooting)
 
 ## Overview
 
-This project provides an end-to-end object detection pipeline optimized for stereo camera data:
+**Two main components:**
 
-- **Zero-shot auto-labeling** using GroundingDINO and SAM models
-- **Automated YOLO training** pipeline with validation
-- **Color-aware object detection** with 10 predefined color categories
-- **Containerized REST API** for production inference
-- **Interactive Jupyter notebooks** for training evaluation and API testing
+### 1. Robot Chat App
+Natural language control interface for robot arm manipulation:
+- Chat with GPT-4 to control robot movements
+- Real-time object detection and tracking
+- Dynamic drop point configuration
+- WebSocket-based reactive UI
 
-### Supported Objects
-- Cups, bottles, bowls, and other kitchen/tableware items
-- 10 color categories: red, green, blue, yellow, orange, purple, pink, brown, black, white
+### 2. Object Detection Pipeline
+Complete YOLO training and inference system:
+- Zero-shot auto-labeling with GroundingDINO
+- Color-aware object detection (9 colors)
+- Containerized REST API
+- Support for: can, duck, cup, sponge, ball, vegetable
 
 ## Quick Start
 
 ### Prerequisites
 - Docker and Docker Compose
-- Python 3.8+ (for training pipeline)
-- CUDA-compatible GPU (recommended for training)
+- OpenAI API key (for robot chat)
+- Python 3.8+ (for training)
 
-### 1. Clone and Setup
+### Robot Chat App
 ```bash
-git clone <repository-url>
-cd adaptibot
+cd robot_chat_app
+cp env.example .env
+# Edit .env and add your OPENAI_API_KEY
+docker-compose up --build -d
 ```
+Access at: http://localhost:8082
 
-### 2. Start Detection API
+### Detection API
 ```bash
 cd detection_api
 docker-compose up --build -d
 ```
+Access at: http://localhost:8000
 
-### 3. Test API
-```bash
-# Health check
-curl http://localhost:8000/health
+## Robot Chat App
 
-# View interactive docs
-open http://localhost:8000/docs
+Natural language interface for robot arm control via TCP/WebSocket.
+
+### Architecture
+- **Backend**: FastAPI + LangGraph (TCP server on port 9000)
+- **Frontend**: Real-time WebSocket UI
+- **Robot**: TCP client (tasker) connects to backend
+
+### Protocol
 ```
+Backend → Robot: {"cmd":"give_objects"}
+Robot → Backend: {"objects": ["id color x y z", ...]}
+Backend → Robot: {"cmd_list":["GRAB x y z", "DROP x y z", ...]}
+Robot → Backend: {"cmd":"start_listen"}
+```
+
+### Features
+- **Natural language commands**: "Put red can in BOX1"
+- **GPT-4 agent**: Interprets requests and generates robot commands
+- **Real-time UI**: Shows detected objects and box contents
+- **Voice input**: Speak commands via browser
+- **Dynamic boxes**: Robot can configure drop points
+
+### Object Format
+Objects: `"id color x y z"` where:
+- `id`: 0-6 (unknown, can, duck, cup, sponge, ball, vegetable)
+- `color`: 0-8 (black, white, grey, red, blue, green, cyan, magenta, yellow)
+- `x,y,z`: Integer coordinates
+
+### Default Drop Boxes
+- BOX1: `50 60 14`
+- BOX2: `550 160 15`
+- BOX3: `850 180 16`
+
+### Configuration
+Environment variables in `.env`:
+```bash
+OPENAI_API_KEY=sk-...
+BACKEND_HOST=0.0.0.0
+BACKEND_PORT=8082
+ROBOT_SERVER_PORT=9000
+```
+
+### Documentation
+- `robot_chat_app/frontend/` - WebSocket client code
+- `robot_chat_app/backend/` - Server and LLM agent
 
 ## Detection API
 
-### Building the Docker Container
+FastAPI service for YOLO-based object detection with color analysis.
 
-#### Build from source:
-```bash
-cd detection_api
-docker-compose build
-```
+### Endpoints
 
-#### Start the service:
-```bash
-docker-compose up -d
-```
-
-#### Stop the service:
-```bash
-docker-compose down
-```
-
-### API Endpoints
-
-#### Health Check
-```bash
-GET /health
-```
-Response:
-```json
-{"status": "healthy", "model_loaded": true}
-```
-
-#### Object Detection
-```bash
-POST /detect
-Content-Type: application/json
-```
-
-Request body:
+**POST /detect** - Detect objects in base64 image
 ```json
 {
-  "image": "base64_encoded_image_data",
+  "image": "base64_encoded_image",
   "confidence_threshold": 0.25
 }
 ```
 
-Response:
-```json
-{
-  "detections": [
-    {
-      "class_name": "cup",
-      "confidence": 0.85,
-      "bbox": [100, 150, 200, 250],
-      "color_name": "red",
-      "color_id": 1
-    }
-  ],
-  "annotated_image": "base64_encoded_annotated_image",
-  "processing_time_ms": 45.2
-}
-```
+**GET /health** - Health check
 
-### Using the API
-
-#### Python Example
+### Usage
 ```python
-import requests
-import base64
+import requests, base64
 
-# Load and encode image
 with open("image.jpg", "rb") as f:
-    image_data = base64.b64encode(f.read()).decode()
+    img = base64.b64encode(f.read()).decode()
 
-# Make detection request
-response = requests.post(
-    "http://localhost:8000/detect",
-    json={
-        "image": image_data,
-        "confidence_threshold": 0.3
-    }
-)
-
-detections = response.json()
-print(f"Found {len(detections['detections'])} objects")
+response = requests.post("http://localhost:8000/detect",
+    json={"image": img, "confidence_threshold": 0.3})
 ```
-
-#### cURL Example
-```bash
-# Encode image to base64
-IMAGE_B64=$(base64 -w 0 image.jpg)
-
-# Make detection request
-curl -X POST "http://localhost:8000/detect" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"image\": \"$IMAGE_B64\",
-    \"confidence_threshold\": 0.25
-  }"
-```
-
-### Docker Configuration
-
-#### Environment Variables
-- `QT_QPA_PLATFORM=offscreen`: Headless OpenCV operation
-- `DISPLAY=:0`: X11 display for compatibility
-
-#### Volume Mounts
-The model weights are mounted from the host:
-```yaml
-volumes:
-  - ../yolo_detect/runs/stereo_objects5/weights:/app/weights:ro
-```
-
-#### Port Mapping
-- Container port `8000` → Host port `8000`
 
 ### Interactive Demo
-
-Run the Jupyter notebook demo:
 ```bash
 cd detection_api
 jupyter notebook api_demo.ipynb
 ```
 
-Features:
-- File upload widget for testing images
-- Confidence threshold slider
-- Real-time detection visualization
-- Batch testing on validation images
+## Training Pipeline
 
-## Auto Data Labeling
+### Auto-Labeling
+Zero-shot labeling with GroundingDINO and SAM:
 
-The auto-labeling pipeline uses zero-shot models to automatically generate YOLO format labels from stereo camera images.
-
-### Models Used
-- **GroundingDINO**: Zero-shot object detection with text prompts
-- **Segment Anything (SAM)**: Precise object segmentation
-- **Color Analysis**: HSV-based color classification
-
-### Running Auto-Labeling
-
-#### Setup Environment
 ```bash
 cd yolo_detect
 pip install -r requirements.txt
-```
 
-#### Basic Usage
-```bash
 python auto_label_zeroshot.py \
   --input_folder dataset/images/unlabeled \
   --output_folder dataset/labels/train \
   --confidence_threshold 0.35
 ```
 
-#### Advanced Options
-```bash
-python auto_label_zeroshot.py \
-  --input_folder dataset/images/unlabeled \
-  --output_folder dataset/labels/train \
-  --confidence_threshold 0.35 \
-  --text_prompt "cup . bowl . bottle . mug" \
-  --color_analysis \
-  --visualize \
-  --batch_size 8
-```
-
-### Text Prompts
-The system uses customizable text prompts for object detection:
-
-**Default prompt**: `"cup . bowl . bottle . mug . glass . plate . spoon . fork . knife . pot . pan . lid"`
-
-**Custom prompts**:
-```bash
---text_prompt "cup . bottle . bowl"  # Specific objects only
---text_prompt "red cup . blue bottle"  # Color-specific detection
-```
-
-### Output Format
-Generated labels follow YOLO format:
-```
-# filename.txt
-class_id center_x center_y width height
-0 0.5 0.3 0.2 0.4
-1 0.8 0.7 0.15 0.25
-```
-
-### Monitoring Progress
-```bash
-python check_labeling_progress.py
-```
-
-Generates:
-- Progress report in JSON format
-- Summary statistics
-- Class distribution analysis
-
-### Quality Control
-- **Confidence filtering**: Remove low-confidence detections
-- **Size filtering**: Remove tiny or oversized bounding boxes
-- **Overlap removal**: NMS to eliminate duplicate detections
-- **Visual inspection**: Optional visualization for manual review
-
-## YOLO Training
-
-### Training Pipeline
-
-#### 1. Prepare Dataset
-```bash
-# Ensure proper dataset structure
-dataset/
-├── images/
-│   ├── train/
-│   └── val/
-└── labels/
-    ├── train/
-    └── val/
-```
-
-#### 2. Configure Training
-Edit `dataset.yaml`:
-```yaml
-train: dataset/images/train
-val: dataset/images/val
-nc: 10  # number of classes
-names: ['cup', 'bowl', 'bottle', 'mug', 'glass', 'plate', 'spoon', 'fork', 'knife', 'other']
-```
-
-#### 3. Start Training
+### YOLO Training
 ```bash
 python train_yolo.py
 ```
 
-#### Advanced Training Options
-```python
-from ultralytics import YOLO
+**Key parameters:**
+- Epochs: 100-300
+- Image size: 640x640
+- Batch size: 8-16 (adjust for GPU memory)
+- Models: yolov8n (fast), yolov8s (balanced), yolov8m (accurate)
 
-model = YOLO('yolov8n.pt')  # or yolov8s.pt, yolov8m.pt
-results = model.train(
-    data='dataset.yaml',
-    epochs=100,
-    imgsz=640,
-    batch=16,
-    name='stereo_objects_v6',
-    patience=20,
-    save_period=10,
-    val=True
-)
-```
+**Outputs:** `runs/stereo_objects5/weights/best.pt`
 
-### Training Parameters
-- **Epochs**: 100-300 (depending on dataset size)
-- **Image size**: 640x640 (optimal for most use cases)
-- **Batch size**: 8-16 (adjust based on GPU memory)
-- **Model variants**: 
-  - `yolov8n.pt`: Fastest inference
-  - `yolov8s.pt`: Balanced speed/accuracy
-  - `yolov8m.pt`: Higher accuracy
-
-### Model Evaluation
-
-#### Validation Notebooks
-- `eval_demo.ipynb`: Interactive model evaluation
-- `label_viz.ipynb`: Dataset visualization and analysis
-
-#### Metrics Monitoring
-Training automatically generates:
-- **mAP scores**: Mean Average Precision at different IoU thresholds
-- **Loss curves**: Training and validation loss progression
-- **Confusion matrix**: Class prediction accuracy
-- **Precision/Recall curves**: Per-class performance analysis
-
-#### Results Location
-```
-runs/
-└── stereo_objects5/
-    ├── weights/
-    │   ├── best.pt      # Best model weights
-    │   └── last.pt      # Final epoch weights
-    ├── results.png      # Training curves
-    ├── confusion_matrix.png
-    └── val_batch*.jpg   # Validation predictions
-```
-
-### Hyperparameter Tuning
-```python
-# Custom training with hyperparameters
-model.train(
-    data='dataset.yaml',
-    epochs=100,
-    lr0=0.01,          # Initial learning rate
-    momentum=0.937,     # SGD momentum
-    weight_decay=0.0005,# Weight decay
-    warmup_epochs=3,    # Warmup epochs
-    box=7.5,           # Box loss gain
-    cls=0.5,           # Class loss gain
-    dfl=1.5            # DFL loss gain
-)
+### Evaluation
+```bash
+cd yolo_detect
+jupyter notebook eval_demo.ipynb
 ```
 
 ## Project Structure
 
 ```
 adaptibot/
-├── yolo_detect/                 # Training pipeline
-│   ├── auto_label_zeroshot.py   # Auto-labeling script
-│   ├── train_yolo.py           # Training script
-│   ├── check_labeling_progress.py
-│   ├── eval_demo.ipynb         # Model evaluation
-│   ├── label_viz.ipynb         # Dataset visualization
-│   ├── color_utils.py          # Color detection utilities
-│   ├── dataset.yaml            # Dataset configuration
+├── robot_chat_app/             # AI robot control interface
+│   ├── backend/
+│   │   ├── app.py              # FastAPI + WebSocket server
+│   │   ├── robot_server.py     # TCP server (port 9000)
+│   │   ├── llm_agent.py        # LangGraph GPT-4 agent
+│   │   └── requirements.txt
+│   ├── frontend/
+│   │   ├── index.html          # WebSocket UI
+│   │   ├── script.js
+│   │   └── style.css
+│   ├── docker-compose.yml
+│   └── PROTOCOL.md             # TCP protocol spec
+├── detection_api/              # YOLO inference API
+│   ├── app.py                  # FastAPI service
+│   ├── color_utils.py          # Color detection
+│   ├── Dockerfile
+│   └── docker-compose.yml
+├── yolo_detect/                # Training pipeline
+│   ├── auto_label_zeroshot.py  # Auto-labeling
+│   ├── train_yolo.py           # YOLO training
+│   ├── eval_demo.ipynb         # Evaluation
 │   ├── dataset/                # Training data
-│   │   ├── images/
-│   │   └── labels/
-│   └── runs/                   # Training outputs
-│       └── stereo_objects5/    # Latest model
-├── detection_api/              # Production API
-│   ├── app.py                  # FastAPI application
-│   ├── color_utils.py          # Color detection (copy)
-│   ├── Dockerfile              # Container configuration
-│   ├── docker-compose.yml      # Service orchestration
-│   ├── requirements.txt        # Python dependencies
-│   ├── api_demo.ipynb          # Interactive API demo
-│   └── README.md               # API documentation
-└── README.md                   # This file
+│   └── runs/                   # Model outputs
+└── README.md
 ```
 
 ## Troubleshooting
 
-### Common Issues
-
-#### 1. Docker Build Failures
+**Docker issues:**
 ```bash
-# Clear Docker cache
-docker system prune -a
-
-# Rebuild with no cache
-docker-compose build --no-cache
+docker-compose logs              # Check logs
+docker-compose ps                # Check status
+docker system prune -a           # Clear cache
+docker-compose build --no-cache  # Fresh build
 ```
 
-#### 2. Model Loading Errors
-Check model path in docker-compose.yml:
-```yaml
-volumes:
-  - ../yolo_detect/runs/stereo_objects5/weights:/app/weights:ro
-```
+**Robot chat:**
+- Verify `OPENAI_API_KEY` in `.env`
+- Check robot connects to port 9000
+- Review `PROTOCOL.md` for message format
 
-#### 3. CUDA Out of Memory (Training)
-Reduce batch size:
-```python
-model.train(data='dataset.yaml', batch=4)  # Reduce from 16 to 4
-```
+**Detection API:**
+- Ensure model weights exist: `yolo_detect/runs/stereo_objects5/weights/best.pt`
+- Test with: `curl http://localhost:8000/health`
 
-#### 4. API Connection Issues
-Verify container is running:
-```bash
-docker-compose ps
-docker-compose logs
-```
-
-#### 5. PyTorch Compatibility
-The API includes compatibility fixes for PyTorch 2.8+ with older model weights. If issues persist, try:
-```bash
-# Use specific PyTorch version
-pip install torch==2.0.1 torchvision==0.15.2
-```
-
-### Performance Optimization
-
-#### GPU Acceleration
-For training with GPU:
-```bash
-# Verify CUDA availability
-python -c "import torch; print(torch.cuda.is_available())"
-
-# Monitor GPU usage
-nvidia-smi -l 1
-```
-
-#### Memory Management
-```python
-# Clear GPU cache during training
-import torch
-torch.cuda.empty_cache()
-```
-
-#### Batch Size Tuning
-Start with small batch size and increase:
-```python
-# Conservative: batch=4
-# Moderate: batch=8  
-# Aggressive: batch=16+
-```
-
-### Support
-
-For issues and questions:
-1. Check container logs: `docker-compose logs`
-2. Verify model weights exist: `ls yolo_detect/runs/stereo_objects5/weights/`
-3. Test with simple curl command first
-4. Review Jupyter notebooks for examples
-
-### Updates
-
-To update the model:
-1. Retrain with new data
-2. Update model path in docker-compose.yml
-3. Rebuild container: `docker-compose build`
-4. Restart: `docker-compose up -d`
+**Training:**
+- Reduce batch size if CUDA out of memory
+- Check GPU: `python -c "import torch; print(torch.cuda.is_available())"`
+- Monitor: `nvidia-smi -l 1`
