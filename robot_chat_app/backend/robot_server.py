@@ -49,6 +49,19 @@ class RobotServer:
         self.client_writer = writer
         self.connected = True
         
+        # Broadcast robot connection status to UI
+        if self.broadcast_callback:
+            await self.broadcast_callback({
+                "type": "system",
+                "content": f"Robot connected from {addr[0]}",
+                "robot_status": "connected"
+            })
+            # Send drop points and current state
+            await self.broadcast_callback({
+                "type": "drop_points",
+                "drop_points": self.drop_points
+            })
+        
         try:
             while True:
                 data = await reader.read(1024)
@@ -94,6 +107,20 @@ class RobotServer:
             ]
             self.reset_boxes()
             logger.info("Robot disconnected - cleared cache and reset to default boxes")
+            
+            # Broadcast robot disconnection to UI
+            if self.broadcast_callback:
+                await self.broadcast_callback({
+                    "type": "system",
+                    "content": "Robot disconnected",
+                    "robot_status": "disconnected"
+                })
+                # Send reset drop points
+                await self.broadcast_callback({
+                    "type": "drop_points",
+                    "drop_points": self.drop_points
+                })
+            
             writer.close()
             await writer.wait_closed()
     

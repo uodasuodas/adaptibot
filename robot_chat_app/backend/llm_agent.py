@@ -25,6 +25,59 @@ class AgentState(TypedDict):
 
 # Tool definitions
 @tool
+async def get_system_status() -> str:
+    """
+    Get current system status including robot connection, box contents, and available resources.
+    Use this to check system state, connection status, and what's in each box.
+    
+    Returns comprehensive information about:
+    - Robot connection status
+    - Number of detected objects available
+    - Number of drop boxes configured
+    - Contents of each box (what objects have been placed in them)
+    - Session command history count
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        status_parts = []
+        
+        # Robot connection status
+        if robot_server.connected:
+            status_parts.append("✓ Robot is CONNECTED and ready")
+        else:
+            status_parts.append("✗ Robot is NOT connected")
+        
+        # Object count
+        obj_count = len(robot_server.current_objects)
+        status_parts.append(f"- {obj_count} objects currently detected in scene")
+        
+        # Drop boxes and their contents
+        box_count = len(robot_server.drop_points)
+        status_parts.append(f"- {box_count} drop boxes configured:")
+        
+        for box in robot_server.drop_points:
+            box_id = box['id']
+            box_label = box['label']
+            contents = robot_server.box_contents.get(box_id, [])
+            
+            if contents:
+                items_desc = ", ".join([f"{item['color_name']} {item['class_name']}" for item in contents])
+                status_parts.append(f"  • {box_label}: {len(contents)} item(s) - {items_desc}")
+            else:
+                status_parts.append(f"  • {box_label}: empty (0 items)")
+        
+        result = "\n".join(status_parts)
+        logger.info(f"System status: connected={robot_server.connected}, objects={obj_count}, boxes={box_count}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"get_system_status error: {e}")
+        return f"Error getting system status: {str(e)}"
+
+
+@tool
 async def get_detected_objects() -> str:
     """
     Get list of currently detected objects from the robot camera.
@@ -99,7 +152,7 @@ async def execute_robot_commands(
 
 
 # Create tools list
-tools = [get_detected_objects, execute_robot_commands]
+tools = [get_system_status, get_detected_objects, execute_robot_commands]
 
 
 class RobotAgent:
@@ -135,8 +188,15 @@ class RobotAgent:
             system_msg = SystemMessage(content="""You are a helpful robot control assistant. 
 
 You have access to:
-1. get_detected_objects() - to see what objects the robot camera detects
-2. execute_robot_commands() - to send grab/drop commands to the robot
+1. get_system_status() - check if robot is connected and see available resources
+2. get_detected_objects() - see what objects the robot camera detects
+3. execute_robot_commands() - send grab/drop commands to the robot
+
+When user asks about system state (connection, status, boxes, etc):
+- ALWAYS call get_system_status() to get current state
+- You can answer questions about box contents, objects, connection status even if robot is not connected
+- The system maintains state - boxes can have objects in them from previous operations
+- Give clear, direct answers based on the actual state data
 
 When user asks to manipulate objects:
 1. First call get_detected_objects() to see what's available
@@ -163,7 +223,10 @@ If user says "put in BOX1" or "drop to BOX2", use the corresponding coordinates.
 Object classes: can, duck, cup, sponge, ball, vegetable
 Colors: black, white, grey, red, blue, green, cyan, magenta, yellow
 
-IMPORTANT: Never guess or assume which objects the user wants. Always ask for clarification if there's any ambiguity. Safety first!
+IMPORTANT: 
+- Never guess or assume which objects the user wants. Always ask for clarification if there's any ambiguity. Safety first!
+- You have access to full conversation history - you remember what commands were executed before
+- The system maintains state across the session - box contents persist even if robot disconnects
 
 Be concise and clear in your responses.""")
             

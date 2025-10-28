@@ -90,6 +90,12 @@ async def websocket_endpoint(websocket: WebSocket):
             "robot_status": "connected" if robot_server.connected else "disconnected"
         })
         
+        # Always send drop points (defaults are available even without robot)
+        await websocket.send_json({
+            "type": "drop_points",
+            "drop_points": robot_server.drop_points
+        })
+        
         # If robot connected, initialize and send current state
         if robot_server.connected:
             try:
@@ -98,10 +104,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({
                     "type": "objects",
                     "objects": objects
-                })
-                await websocket.send_json({
-                    "type": "drop_points",
-                    "drop_points": robot_server.drop_points
                 })
                 await websocket.send_json({
                     "type": "box_contents",

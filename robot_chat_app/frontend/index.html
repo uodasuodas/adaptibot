@@ -10,9 +10,17 @@
     <div class="container">
         <header>
             <h1>Robot control chat</h1>
-            <div class="status">
-                <span class="status-indicator" id="robotStatus">●</span>
-                <span id="statusText">Connecting...</span>
+            <div class="status-container">
+                <div class="status">
+                    <span class="status-label">Backend:</span>
+                    <span class="status-indicator" id="backendStatus">●</span>
+                    <span id="backendText">Connecting...</span>
+                </div>
+                <div class="status">
+                    <span class="status-label">Robot:</span>
+                    <span class="status-indicator" id="robotStatus">●</span>
+                    <span id="robotText">Unknown</span>
+                </div>
             </div>
         </header>
 
