@@ -8,8 +8,10 @@ const chatInput = document.getElementById('chatInput');
 const sendBtn = document.getElementById('sendBtn');
 const voiceBtn = document.getElementById('voiceBtn');
 const objectsList = document.getElementById('objectsList');
+const backendStatus = document.getElementById('backendStatus');
+const backendText = document.getElementById('backendText');
 const robotStatus = document.getElementById('robotStatus');
-const statusText = document.getElementById('statusText');
+const robotText = document.getElementById('robotText');
 const refreshBtn = document.getElementById('refreshBtn');
 
 function connect() {
@@ -20,7 +22,7 @@ function connect() {
     
     ws.onopen = () => {
         console.log('Connected to server');
-        updateStatus(true);
+        updateBackendStatus(true);
     };
     
     ws.onmessage = (event) => {
@@ -30,23 +32,34 @@ function connect() {
     
     ws.onclose = () => {
         console.log('Disconnected from server');
-        updateStatus(false);
+        updateBackendStatus(false);
+        updateRobotStatus(false);
         setTimeout(connect, 3000);
     };
     
     ws.onerror = (error) => {
         console.error('WebSocket error:', error);
-        updateStatus(false);
+        updateBackendStatus(false);
     };
 }
 
-function updateStatus(connected) {
+function updateBackendStatus(connected) {
+    if (connected) {
+        backendStatus.className = 'status-indicator connected';
+        backendText.textContent = 'Connected';
+    } else {
+        backendStatus.className = 'status-indicator disconnected';
+        backendText.textContent = 'Disconnected';
+    }
+}
+
+function updateRobotStatus(connected) {
     if (connected) {
         robotStatus.className = 'status-indicator connected';
-        statusText.textContent = 'Connected';
+        robotText.textContent = 'Connected';
     } else {
         robotStatus.className = 'status-indicator disconnected';
-        statusText.textContent = 'Disconnected';
+        robotText.textContent = 'Not Connected';
     }
 }
 
@@ -54,6 +67,10 @@ function handleMessage(data) {
     switch (data.type) {
         case 'system':
             addMessage('system', data.content);
+            // Update robot status if provided
+            if (data.robot_status !== undefined) {
+                updateRobotStatus(data.robot_status === 'connected');
+            }
             break;
         case 'user':
             addMessage('user', data.content);
