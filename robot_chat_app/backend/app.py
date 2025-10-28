@@ -27,11 +27,23 @@ active_connections: Set[WebSocket] = set()
 # Initialize agent
 agent = None
 
+# Callback for broadcasting messages to all clients
+async def broadcast_message(message: dict):
+    """Broadcast message to all connected WebSocket clients"""
+    for connection in active_connections:
+        try:
+            await connection.send_json(message)
+        except Exception as e:
+            logger.error(f"Error broadcasting to client: {e}")
+
 
 @app.on_event("startup")
 async def startup_event():
     """Start robot server and initialize agent"""
     global agent
+    
+    # Set broadcast callback for robot server
+    robot_server.broadcast_callback = broadcast_message
     
     # Start robot TCP server in background
     asyncio.create_task(robot_server.start())
@@ -78,7 +90,7 @@ async def websocket_endpoint(websocket: WebSocket):
             "robot_status": "connected" if robot_server.connected else "disconnected"
         })
         
-        # If robot connected, initialize and send current objects
+        # If robot connected, initialize and send current state
         if robot_server.connected:
             try:
                 await robot_server.initialize_session()
@@ -86,6 +98,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({
                     "type": "objects",
                     "objects": objects
+                })
+                await websocket.send_json({
+                    "type": "drop_points",
+                    "drop_points": robot_server.drop_points
+                })
+                await websocket.send_json({
+                    "type": "box_contents",
+                    "boxes": robot_server.box_contents
                 })
             except Exception as e:
                 logger.error(f"Failed to initialize session: {e}")
@@ -135,13 +155,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     })
             
             elif message_type == "refresh_objects":
-                # Refresh object list
+                # Refresh object list from robot
                 if robot_server.connected:
                     try:
                         objects = await robot_server.get_objects()
                         await websocket.send_json({
                             "type": "objects",
                             "objects": objects
+                        })
+                        await websocket.send_json({
+                            "type": "system",
+                            "content": f"Refreshed: {len(objects)} objects detected"
                         })
                     except Exception as e:
                         logger.error(f"Error refreshing objects: {e}")

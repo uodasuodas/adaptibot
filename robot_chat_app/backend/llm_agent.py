@@ -9,8 +9,8 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.tools import tool
 from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolNode
 from langgraph.graph.message import add_messages
+from langchain_core.messages import ToolMessage
 
 from robot_server import robot_server
 
@@ -25,60 +25,77 @@ class AgentState(TypedDict):
 
 # Tool definitions
 @tool
-def get_detected_objects() -> str:
+async def get_detected_objects() -> str:
     """
     Get list of currently detected objects from the robot camera.
     Returns objects with their ID, class, color, and coordinates.
+    
+    Use this to check what objects are available before executing any commands.
+    If the user's request doesn't clearly match any objects, ask for clarification instead of guessing.
     """
-    import asyncio
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    objects = loop.run_until_complete(robot_server.get_objects())
-    loop.close()
+    import logging
+    logger = logging.getLogger(__name__)
     
-    if not objects:
-        return "No objects detected"
-    
-    result = "Detected objects:\n"
-    for obj in objects:
-        result += f"- {obj['color_name']} {obj['class_name']} at ({obj['x']}, {obj['y']}, {obj['z']})\n"
-    
-    return result
+    try:
+        objects = await robot_server.get_objects()
+        
+        if not objects:
+            logger.warning("get_detected_objects: No objects found")
+            return "No objects detected"
+        
+        result = "Detected objects:\n"
+        for obj in objects:
+            result += f"- {obj['color_name']} {obj['class_name']} at ({obj['x']}, {obj['y']}, {obj['z']})\n"
+        
+        logger.info(f"get_detected_objects: Found {len(objects)} objects")
+        return result
+    except Exception as e:
+        logger.error(f"get_detected_objects error: {e}")
+        return f"Error getting objects: {str(e)}"
 
 
 @tool
-def execute_robot_commands(
+async def execute_robot_commands(
     grab_coords: List[str],
     drop_coords: List[str]
 ) -> str:
     """
     Execute GRAB and DROP commands on the robot.
     
+    ONLY call this function when you have a CLEAR MATCH between user's request and detected objects.
+    If uncertain or ambiguous, ask the user for clarification instead.
+    
     Args:
         grab_coords: List of coordinates to grab from, format: ["x y z", ...]
         drop_coords: List of coordinates to drop to, format: ["x y z", ...]
         
     Each grab must be followed by a drop. The lists must have the same length.
-    Available drop points: "50 60 14", "550 160 15", "850 180 16"
+    Available drop boxes:
+        BOX1: "50 60 14"
+        BOX2: "550 160 15"
+        BOX3: "850 180 16"
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     if len(grab_coords) != len(drop_coords):
+        logger.error(f"Coordinate mismatch: {len(grab_coords)} grabs, {len(drop_coords)} drops")
         return "Error: Number of grab and drop coordinates must match"
     
-    cmd_list = []
-    for grab, drop in zip(grab_coords, drop_coords):
-        cmd_list.append(f"GRAB {grab}")
-        cmd_list.append(f"DROP {drop}")
+    logger.info(f"🤖 Executing {len(grab_coords)} grab-drop pairs ONE BY ONE")
     
-    import asyncio
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    success = loop.run_until_complete(robot_server.execute_commands(cmd_list))
-    loop.close()
-    
-    if success:
-        return f"Successfully executed {len(grab_coords)} grab-drop pairs"
-    else:
-        return "Failed to execute commands"
+    try:
+        success = await robot_server.execute_commands_sequential(grab_coords, drop_coords)
+        
+        if success:
+            logger.info(f"✅ Successfully executed {len(grab_coords)} grab-drop pairs")
+            return f"Successfully executed {len(grab_coords)} grab-drop pairs"
+        else:
+            logger.error("Command execution failed")
+            return "Failed to execute commands"
+    except Exception as e:
+        logger.error(f"execute_robot_commands error: {e}")
+        return f"Error executing commands: {str(e)}"
 
 
 # Create tools list
@@ -88,7 +105,7 @@ tools = [get_detected_objects, execute_robot_commands]
 class RobotAgent:
     def __init__(self, api_key: str):
         self.llm = ChatOpenAI(
-            model="gpt-4",
+            model="gpt-4.1",
             api_key=api_key,
             temperature=0
         )
@@ -109,6 +126,9 @@ class RobotAgent:
         
         def call_model(state: AgentState) -> AgentState:
             """Call the LLM"""
+            import logging
+            logger = logging.getLogger(__name__)
+            
             messages = state["messages"]
             
             # Add system message with context
@@ -120,28 +140,112 @@ You have access to:
 
 When user asks to manipulate objects:
 1. First call get_detected_objects() to see what's available
-2. Create a plan based on the user's request (e.g., "throw out all red balls")
-3. Extract coordinates of matching objects
-4. Call execute_robot_commands() with grab coordinates and drop point coordinates
-5. Report progress to the user
+2. Check if the user's request CLEARLY matches available objects
+3. If UNCERTAIN or NO CLEAR MATCH:
+   - DO NOT attempt to execute commands
+   - Ask the user to clarify which specific object(s) they mean
+   - List the available objects that might be relevant
+   - Ask them to be more specific (e.g., specify color, type, or location)
+4. If CLEAR MATCH found:
+   - Create a plan based on the user's request
+   - Extract coordinates of matching objects
+   - Match user's drop location request to box coordinates
+   - Call execute_robot_commands() with grab coordinates and drop point coordinates
+   - Report progress to the user
 
-Available drop points: "50 60 14", "550 160 15", "850 180 16"
+Available drop boxes (users can reference by label):
+- BOX1: "50 60 14"
+- BOX2: "550 160 15"
+- BOX3: "850 180 16"
+
+If user says "put in BOX1" or "drop to BOX2", use the corresponding coordinates.
 
 Object classes: can, duck, cup, sponge, ball, vegetable
-Colors: red, blue, green, yellow, black, grey, white, violet, orange, turquoise
+Colors: black, white, grey, red, blue, green, cyan, magenta, yellow
+
+IMPORTANT: Never guess or assume which objects the user wants. Always ask for clarification if there's any ambiguity. Safety first!
 
 Be concise and clear in your responses.""")
             
             messages_with_system = [system_msg] + messages
             response = self.llm_with_tools.invoke(messages_with_system)
             
+            # Log what the LLM decided to do
+            if hasattr(response, 'tool_calls') and response.tool_calls:
+                logger.info(f"LLM wants to call {len(response.tool_calls)} tool(s)")
+            else:
+                logger.info(f"LLM response (no tools): {response.content[:200] if response.content else 'empty'}")
+            
             return {"messages": [response]}
+        
+        async def call_tools(state: AgentState) -> AgentState:
+            """Execute tool calls"""
+            import logging
+            import asyncio
+            logger = logging.getLogger(__name__)
+            
+            messages = state["messages"]
+            last_message = messages[-1]
+            
+            tool_messages = []
+            for tool_call in last_message.tool_calls:
+                tool_name = tool_call["name"]
+                tool_args = tool_call["args"]
+                
+                logger.info(f"🔧 Calling tool: {tool_name} with args: {tool_args}")
+                
+                # Find and execute the tool
+                tool_func = None
+                for t in tools:
+                    if t.name == tool_name:
+                        tool_func = t
+                        break
+                
+                if tool_func:
+                    # Call the tool function
+                    try:
+                        import inspect
+                        
+                        # Find the actual coroutine function
+                        # Try different possible attributes where the async function might be stored
+                        actual_func = None
+                        for attr in ['coroutine', 'afunc', 'func', '_run_func', 'run_func']:
+                            if hasattr(tool_func, attr):
+                                f = getattr(tool_func, attr)
+                                if f is not None:
+                                    actual_func = f
+                                    logger.info(f"🔍 Found function at .{attr}: {type(f)}")
+                                    break
+                        
+                        # Check if we have an async function
+                        if actual_func and inspect.iscoroutinefunction(actual_func):
+                            logger.info(f"Calling async function directly")
+                            result = await actual_func(**tool_args)
+                        else:
+                            # Use coroutine-based invocation
+                            logger.info(f"Using coroutine invocation")
+                            result = await tool_func.arun(**tool_args)
+                    except Exception as e:
+                        logger.error(f"Error calling tool {tool_name}: {e}", exc_info=True)
+                        result = f"Error: {str(e)}"
+                    
+                    logger.info(f"Tool {tool_name} returned: {result[:200] if len(str(result)) > 200 else result}")
+                    tool_messages.append(
+                        ToolMessage(
+                            content=str(result),
+                            tool_call_id=tool_call["id"]
+                        )
+                    )
+                else:
+                    logger.error(f"Tool {tool_name} not found!")
+            
+            return {"messages": tool_messages}
         
         # Build graph
         workflow = StateGraph(AgentState)
         
         workflow.add_node("agent", call_model)
-        workflow.add_node("tools", ToolNode(tools))
+        workflow.add_node("tools", call_tools)
         
         workflow.set_entry_point("agent")
         workflow.add_conditional_edges(
@@ -158,6 +262,11 @@ Be concise and clear in your responses.""")
     
     async def process_message(self, message: str) -> str:
         """Process user message and return response"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"Processing message: {message}")
+        
         state = {
             "messages": [HumanMessage(content=message)],
             "objects": [],
@@ -167,10 +276,13 @@ Be concise and clear in your responses.""")
         
         result = await self.graph.ainvoke(state)
         
+        logger.info(f"Graph execution complete. Message count: {len(result['messages'])}")
+        
         # Extract final AI response
         messages = result["messages"]
         for msg in reversed(messages):
             if isinstance(msg, AIMessage) and msg.content:
+                logger.info(f"Final response: {msg.content[:200]}")
                 return msg.content
         
         return "I processed your request."
