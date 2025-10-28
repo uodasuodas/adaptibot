@@ -69,8 +69,17 @@ function handleMessage(data) {
         case 'typing':
             addTypingIndicator();
             break;
+        case 'command':
+            addCommandMessage(data.content, data.index, data.total);
+            break;
         case 'objects':
             updateObjectsList(data.objects);
+            break;
+        case 'drop_points':
+            updateDropPoints(data.drop_points);
+            break;
+        case 'box_contents':
+            updateBoxContents(data.boxes);
             break;
     }
 }
@@ -82,6 +91,19 @@ function addMessage(type, content) {
     const contentDiv = document.createElement('div');
     contentDiv.className = 'message-content';
     contentDiv.textContent = content;
+    
+    messageDiv.appendChild(contentDiv);
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function addCommandMessage(command, index, total) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message command';
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    contentDiv.textContent = `[${index}/${total}] ${command}`;
     
     messageDiv.appendChild(contentDiv);
     chatMessages.appendChild(messageDiv);
@@ -135,6 +157,84 @@ function updateObjectsList(objects) {
         `;
         
         objectsList.appendChild(item);
+    });
+}
+
+function updateDropPoints(dropPoints) {
+    console.log('Updating drop points:', dropPoints);
+    const dropBoxesList = document.querySelector('.drop-boxes-list');
+    
+    if (!dropBoxesList) {
+        console.log('Drop boxes list not found');
+        return;
+    }
+    
+    // Clear existing boxes
+    dropBoxesList.innerHTML = '';
+    
+    if (!dropPoints || dropPoints.length === 0) {
+        dropBoxesList.innerHTML = '<p class="no-objects">No drop points configured</p>';
+        return;
+    }
+    
+    // Create box elements for each drop point
+    dropPoints.forEach(box => {
+        const boxItem = document.createElement('div');
+        boxItem.className = 'drop-box-item';
+        boxItem.dataset.boxId = box.id;
+        
+        boxItem.innerHTML = `
+            <div class="box-info">
+                <div class="box-label">${box.label}</div>
+                <div class="box-coords">${box.coordinates}</div>
+            </div>
+            <div class="box-indicators"></div>
+        `;
+        
+        dropBoxesList.appendChild(boxItem);
+    });
+}
+
+function updateBoxContents(boxes) {
+    console.log('Updating box contents:', boxes);
+    
+    Object.keys(boxes).forEach(boxId => {
+        const boxElement = document.querySelector(`[data-box-id="${boxId}"]`);
+        
+        if (!boxElement) {
+            console.log(`Box element not found for box ID ${boxId}`);
+            return;
+        }
+        
+        const items = boxes[boxId];
+        const indicatorContainer = boxElement.querySelector('.box-indicators');
+        
+        if (!indicatorContainer) {
+            console.log(`Indicator container not found for box ID ${boxId}`);
+            return;
+        }
+        
+        // Clear existing indicators
+        indicatorContainer.innerHTML = '';
+        
+        if (items.length === 0) {
+            console.log(`No items in box ID ${boxId}`);
+            return;
+        }
+        
+        console.log(`Box ID ${boxId} has ${items.length} items:`, items);
+        
+        // Create one icon for each object
+        items.forEach((item, index) => {
+            const color = item.color_name;
+            const className = item.class_name;
+            const indicator = document.createElement('span');
+            indicator.className = `box-indicator color-${color}`;
+            indicator.textContent = '●';
+            indicator.title = `${color} ${className}`;
+            indicatorContainer.appendChild(indicator);
+            console.log(`Added indicator ${index + 1} for ${color} ${className}`);
+        });
     });
 }
 

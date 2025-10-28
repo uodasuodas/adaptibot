@@ -71,12 +71,16 @@ header h1 {
     width: 350px;
     border-right: 1px solid #e2e8f0;
     background: #fafbfc;
+    display: flex;
+    flex-direction: column;
 }
 
 .objects-panel {
-    height: 100%;
+    flex: 1;
     display: flex;
     flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .panel-header {
@@ -158,10 +162,92 @@ header h1 {
 .color-black { background: #e2e8f0; color: #1a202c; }
 .color-grey { background: #e2e8f0; color: #4a5568; }
 .color-white { background: #f7fafc; color: #2d3748; border: 1px solid #cbd5e0; }
-.color-violet { background: #e9d8fd; color: #553c9a; }
-.color-orange { background: #feebc8; color: #c05621; }
-.color-turquoise { background: #b2f5ea; color: #234e52; }
+.color-cyan { background: #b2f5ea; color: #234e52; }
+.color-magenta { background: #fbb6ce; color: #97266d; }
 .color-unknown { background: #edf2f7; color: #718096; }
+
+.drop-boxes-panel {
+    border-top: 1px solid #e2e8f0;
+    background: #fafbfc;
+    flex-shrink: 0;
+}
+
+.drop-boxes-list {
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.drop-box-item {
+    background: white;
+    border: 2px solid #667eea;
+    border-radius: 6px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.drop-box-item .box-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.drop-box-item .box-label {
+    font-weight: 700;
+    color: #667eea;
+    font-size: 14px;
+    letter-spacing: 0.5px;
+}
+
+.drop-box-item .box-coords {
+    font-family: 'Courier New', monospace;
+    color: #4a5568;
+    font-size: 12px;
+    background: #edf2f7;
+    padding: 4px 8px;
+    border-radius: 3px;
+}
+
+.box-indicators {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-height: 24px;
+}
+
+.box-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    font-size: 12px;
+    cursor: help;
+    transition: transform 0.2s;
+    /* Default fallback styling */
+    background: #e2e8f0;
+    color: #2d3748;
+}
+
+.box-indicator:hover {
+    transform: scale(1.2);
+}
+
+/* Ensure color classes work on indicators */
+.box-indicator.color-red { background: #fed7d7; color: #c53030; }
+.box-indicator.color-blue { background: #bee3f8; color: #2c5282; }
+.box-indicator.color-green { background: #c6f6d5; color: #22543d; }
+.box-indicator.color-yellow { background: #fefcbf; color: #744210; }
+.box-indicator.color-black { background: #e2e8f0; color: #1a202c; }
+.box-indicator.color-grey { background: #e2e8f0; color: #4a5568; }
+.box-indicator.color-white { background: #f7fafc; color: #2d3748; border: 1px solid #cbd5e0; }
+.box-indicator.color-cyan { background: #b2f5ea; color: #234e52; }
+.box-indicator.color-magenta { background: #fbb6ce; color: #97266d; }
+.box-indicator.color-unknown { background: #edf2f7; color: #718096; }
 
 .chat-panel {
     flex: 1;
@@ -224,6 +310,18 @@ header h1 {
 .message.error .message-content {
     background: #fed7d7;
     color: #c53030;
+}
+
+.message.command {
+    align-items: center;
+}
+
+.message.command .message-content {
+    background: #d6bcfa;
+    color: #44337a;
+    font-size: 13px;
+    padding: 8px 12px;
+    font-family: 'Courier New', monospace;
 }
 
 .typing {

@@ -14,7 +14,7 @@ COPY frontend/ ./frontend/
 WORKDIR /app/backend
 
 # Expose ports
-EXPOSE 8080 8000
+EXPOSE 8082 9000
 
 # Run the application
 CMD ["python", "app.py"]
