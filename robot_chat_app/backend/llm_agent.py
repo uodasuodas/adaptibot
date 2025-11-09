@@ -33,7 +33,7 @@ async def get_system_status() -> str:
     Returns comprehensive information about:
     - Robot connection status
     - Number of detected objects available
-    - Number of drop boxes configured
+    - Number of drop boxes configured with their coordinates
     - Contents of each box (what objects have been placed in them)
     - Session command history count
     """
@@ -60,13 +60,14 @@ async def get_system_status() -> str:
         for box in robot_server.drop_points:
             box_id = box['id']
             box_label = box['label']
+            box_coords = box['coordinates']
             contents = robot_server.box_contents.get(box_id, [])
             
             if contents:
                 items_desc = ", ".join([f"{item['color_name']} {item['class_name']}" for item in contents])
-                status_parts.append(f"  • {box_label}: {len(contents)} item(s) - {items_desc}")
+                status_parts.append(f"  • {box_label} at ({box_coords}): {len(contents)} item(s) - {items_desc}")
             else:
-                status_parts.append(f"  • {box_label}: empty (0 items)")
+                status_parts.append(f"  • {box_label} at ({box_coords}): empty (0 items)")
         
         result = "\n".join(status_parts)
         logger.info(f"System status: connected={robot_server.connected}, objects={obj_count}, boxes={box_count}")
@@ -90,11 +91,11 @@ async def get_detected_objects() -> str:
     logger = logging.getLogger(__name__)
     
     try:
-        objects = await robot_server.get_objects()
+        objects = await robot_server.get_objects(retry_count=2)
         
         if not objects:
-            logger.warning("get_detected_objects: No objects found")
-            return "No objects detected"
+            logger.warning("get_detected_objects: No objects found after retries")
+            return "No objects detected. The robot camera may not see any objects in the scene, or there may be a communication issue."
         
         result = "Detected objects:\n"
         for obj in objects:
@@ -123,10 +124,8 @@ async def execute_robot_commands(
         drop_coords: List of coordinates to drop to, format: ["x y z", ...]
         
     Each grab must be followed by a drop. The lists must have the same length.
-    Available drop boxes:
-        BOX1: "50 60 14"
-        BOX2: "550 160 15"
-        BOX3: "850 180 16"
+    IMPORTANT: Use get_system_status() first to see the current box coordinates.
+    The robot can dynamically configure drop boxes, so always check their current coordinates.
     """
     import logging
     logger = logging.getLogger(__name__)
@@ -135,17 +134,20 @@ async def execute_robot_commands(
         logger.error(f"Coordinate mismatch: {len(grab_coords)} grabs, {len(drop_coords)} drops")
         return "Error: Number of grab and drop coordinates must match"
     
-    logger.info(f"🤖 Executing {len(grab_coords)} grab-drop pairs ONE BY ONE")
+    logger.info(f"🤖 Executing {len(grab_coords)} grab-drop pairs sequentially")
     
     try:
+        # This will wait for robot to actually complete all movements
         success = await robot_server.execute_commands_sequential(grab_coords, drop_coords)
         
         if success:
-            logger.info(f"✅ Successfully executed {len(grab_coords)} grab-drop pairs")
-            return f"Successfully executed {len(grab_coords)} grab-drop pairs"
+            logger.info(f"✅ Robot completed all {len(grab_coords)} operations")
+            # Use cached state (no camera query)
+            remaining = len(robot_server.current_objects)
+            return f"Successfully completed all {len(grab_coords)} operations. {remaining} objects remaining in scene."
         else:
-            logger.error("Command execution failed")
-            return "Failed to execute commands"
+            logger.error("Command execution failed or robot did not respond")
+            return "Failed to execute commands - robot may not have responded properly"
     except Exception as e:
         logger.error(f"execute_robot_commands error: {e}")
         return f"Error executing commands: {str(e)}"
@@ -188,7 +190,7 @@ class RobotAgent:
             system_msg = SystemMessage(content="""You are a helpful robot control assistant. 
 
 You have access to:
-1. get_system_status() - check if robot is connected and see available resources
+1. get_system_status() - check robot connection, see box coordinates and contents
 2. get_detected_objects() - see what objects the robot camera detects
 3. execute_robot_commands() - send grab/drop commands to the robot
 
@@ -199,32 +201,31 @@ When user asks about system state (connection, status, boxes, etc):
 - Give clear, direct answers based on the actual state data
 
 When user asks to manipulate objects:
-1. First call get_detected_objects() to see what's available
-2. Check if the user's request CLEARLY matches available objects
-3. If UNCERTAIN or NO CLEAR MATCH:
+1. FIRST call get_system_status() to see current box coordinates (robot can update them dynamically)
+2. Call get_detected_objects() to see what's available
+3. Check if the user's request CLEARLY matches available objects
+4. If UNCERTAIN or NO CLEAR MATCH:
    - DO NOT attempt to execute commands
    - Ask the user to clarify which specific object(s) they mean
    - List the available objects that might be relevant
    - Ask them to be more specific (e.g., specify color, type, or location)
-4. If CLEAR MATCH found:
+5. If CLEAR MATCH found:
    - Create a plan based on the user's request
    - Extract coordinates of matching objects
-   - Match user's drop location request to box coordinates
-   - Call execute_robot_commands() with grab coordinates and drop point coordinates
+   - Match user's drop location request (e.g., BOX1, BOX2) to the box coordinates from get_system_status()
+   - Call execute_robot_commands() with grab coordinates and the CURRENT box coordinates
    - Report progress to the user
 
-Available drop boxes (users can reference by label):
-- BOX1: "50 60 14"
-- BOX2: "550 160 15"
-- BOX3: "850 180 16"
-
-If user says "put in BOX1" or "drop to BOX2", use the corresponding coordinates.
+Drop boxes: The robot can dynamically configure drop boxes (BOX1, BOX2, BOX3, etc).
+ALWAYS get the current box coordinates from get_system_status() before executing commands.
+When user says "put in BOX1" or "drop to BOX2", use the box coordinates shown in get_system_status().
 
 Object classes: can, duck, cup, sponge, ball, vegetable
 Colors: black, white, grey, red, blue, green, cyan, magenta, yellow
 
 IMPORTANT: 
 - Never guess or assume which objects the user wants. Always ask for clarification if there's any ambiguity. Safety first!
+- Box coordinates can change - ALWAYS check get_system_status() before executing drop commands
 - You have access to full conversation history - you remember what commands were executed before
 - The system maintains state across the session - box contents persist even if robot disconnects
 

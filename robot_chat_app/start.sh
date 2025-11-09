@@ -24,7 +24,7 @@ if [ -z "$OPENAI_API_KEY" ] || [ "$OPENAI_API_KEY" = "your_openai_api_key_here" 
 fi
 
 echo "Starting Docker containers..."
-docker-compose up --build
+docker compose up --build
 
 echo "Application stopped"
 

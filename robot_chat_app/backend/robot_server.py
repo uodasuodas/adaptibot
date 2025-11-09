@@ -29,6 +29,8 @@ class RobotServer:
         self.broadcast_callback = None  # Will be set by app.py
         # Track objects in each box: {box_id: [objects]}
         self.box_contents: Dict[int, List[Dict]] = {0: [], 1: [], 2: []}
+        # Lock to prevent concurrent command/response cycles from interfering
+        self.command_lock = asyncio.Lock()
         
     async def start(self):
         """Start the TCP server"""
@@ -135,16 +137,34 @@ class RobotServer:
         await self.client_writer.drain()
         await asyncio.sleep(0.5)
     
-    async def wait_for_response(self, timeout: float = 30.0) -> Optional[Dict]:
-        """Wait for response from tasker"""
+    async def wait_for_response(self, timeout: float = 30.0, expected_keys: List[str] = None) -> Optional[Dict]:
+        """
+        Wait for response from tasker
+        
+        Args:
+            timeout: Max time to wait for response
+            expected_keys: Optional list of keys that must be in the response (e.g., ['cmd'], ['objects'])
+        """
         try:
             response = await asyncio.wait_for(
                 self.response_queue.get(), 
                 timeout=timeout
             )
-            return json.loads(response)
+            parsed = json.loads(response)
+            
+            # Validate response has expected keys
+            if expected_keys:
+                has_expected = any(key in parsed for key in expected_keys)
+                if not has_expected:
+                    logger.warning(f"Got unexpected response (expected keys {expected_keys}): {parsed}")
+                    # Put it back for someone else who might need it
+                    await self.response_queue.put(response)
+                    # Try again with remaining timeout
+                    return await self.wait_for_response(timeout=timeout, expected_keys=expected_keys)
+            
+            return parsed
         except asyncio.TimeoutError:
-            logger.error("Timeout waiting for response")
+            logger.error(f"Timeout waiting for response (expected keys: {expected_keys})")
             return None
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse response: {e}")
@@ -208,20 +228,44 @@ class RobotServer:
         await self.send_command({"cmd": "start_listen"})
         logger.info("Session initialized")
     
-    async def get_objects(self) -> List[Dict]:
-        """Request current object list from tasker"""
-        await self.send_command({"cmd": "give_objects"})
-        response = await self.wait_for_response()
+    async def _get_objects_unlocked(self, retry_count: int = 2) -> List[Dict]:
+        """Internal method: get objects without lock (caller must hold command_lock)"""
+        for attempt in range(retry_count):
+            if not self.connected:
+                logger.error("Robot not connected, cannot get objects")
+                return []
+            
+            try:
+                logger.info(f"Sending give_objects command (attempt {attempt + 1})")
+                await self.send_command({"cmd": "give_objects"})
+                response = await self.wait_for_response(timeout=10.0, expected_keys=['objects'])
+                logger.info(f"Received response to give_objects: {response}")
+                
+                if response and "objects" in response:
+                    objects = self.parse_objects(response["objects"])
+                    self.current_objects = objects
+                    logger.info(f"Parsed {len(objects)} objects from tasker (attempt {attempt + 1})")
+                    for obj in objects:
+                        logger.info(f"  - {obj['color_name']} {obj['class_name']} at ({obj['x']}, {obj['y']}, {obj['z']})")
+                    return objects
+                
+                logger.warning(f"No objects in response from tasker (attempt {attempt + 1})")
+                if attempt < retry_count - 1:
+                    logger.info("Retrying get_objects...")
+                    await asyncio.sleep(0.5)
+            except Exception as e:
+                logger.error(f"Error getting objects (attempt {attempt + 1}): {e}")
+                if attempt < retry_count - 1:
+                    await asyncio.sleep(0.5)
         
-        if response and "objects" in response:
-            objects = self.parse_objects(response["objects"])
-            self.current_objects = objects
-            logger.info(f" Parsed {len(objects)} objects from tasker")
-            for obj in objects:
-                logger.info(f"  - {obj['color_name']} {obj['class_name']} at ({obj['x']}, {obj['y']}, {obj['z']})")
-            return objects
-        logger.warning(" No objects in response from tasker")
+        # Return empty list after all retries failed
+        logger.error(f"Failed to get objects after {retry_count} attempts")
         return []
+    
+    async def get_objects(self, retry_count: int = 2) -> List[Dict]:
+        """Request current object list from tasker with retry logic"""
+        async with self.command_lock:
+            return await self._get_objects_unlocked(retry_count)
     
     
     def parse_objects(self, obj_list: List[str]) -> List[Dict]:
@@ -279,130 +323,180 @@ class RobotServer:
     
     async def execute_commands(self, cmd_list: List[str]) -> bool:
         """Send command list to tasker for execution"""
-        # Broadcast each command to UI
-        if self.broadcast_callback:
-            for i, cmd in enumerate(cmd_list):
-                await self.broadcast_callback({
-                    "type": "command",
-                    "content": cmd,
-                    "index": i + 1,
-                    "total": len(cmd_list)
-                })
-        
-        await self.send_command({"cmd_list": cmd_list})
-        
-        # Wait for stop_listen acknowledgment
-        response = await self.wait_for_response()
-        if not response:
-            return False
-        
-        # Wait for start_listen when execution completes
-        response = await self.wait_for_response(timeout=120.0)
-        
-        # Broadcast completion and refresh objects
-        if response and self.broadcast_callback:
-            # Get fresh object list
-            objects = await self.get_objects()
-            await self.broadcast_callback({
-                "type": "objects",
-                "objects": objects
-            })
-            await self.broadcast_callback({
-                "type": "system",
-                "content": f" Completed {len(cmd_list)//2} operations"
-            })
-        
-        return response is not None
-    
-    async def execute_commands_sequential(self, grab_coords: List[str], drop_coords: List[str]) -> bool:
-        """Execute GRAB & DROP commands one by one, updating UI after each pair"""
-        total_pairs = len(grab_coords)
-        
-        # Get fresh object list before starting
-        await self.get_objects()
-        logger.info(f"🎯 Starting sequential execution with {len(self.current_objects)} objects available")
-        
-        for i, (grab, drop) in enumerate(zip(grab_coords, drop_coords)):
-            pair_num = i + 1
+        async with self.command_lock:
+            if not self.connected:
+                logger.error("Robot not connected, cannot execute commands")
+                return False
             
-            # Find which object is being grabbed (must do this BEFORE execution)
-            grabbed_obj = None
-            for obj in self.current_objects:
-                obj_coords = f"{obj['x']} {obj['y']} {obj['z']}"
-                logger.info(f"  Comparing: obj_coords='{obj_coords}' with grab='{grab}'")
-                if obj_coords == grab:
-                    grabbed_obj = obj
-                    logger.info(f"   Found matching object: {obj}")
-                    break
-            
-            if not grabbed_obj:
-                logger.warning(f" Could not find object at coordinates: {grab}")
-            
-            # Broadcast which pair we're executing
+            # Broadcast each command to UI
             if self.broadcast_callback:
-                await self.broadcast_callback({
-                    "type": "command",
-                    "content": f"GRAB {grab}",
-                    "index": pair_num * 2 - 1,
-                    "total": total_pairs * 2
-                })
-                await self.broadcast_callback({
-                    "type": "command", 
-                    "content": f"DROP {drop}",
-                    "index": pair_num * 2,
-                    "total": total_pairs * 2
-                })
+                for i, cmd in enumerate(cmd_list):
+                    await self.broadcast_callback({
+                        "type": "command",
+                        "content": cmd,
+                        "index": i + 1,
+                        "total": len(cmd_list)
+                    })
             
-            # Execute this pair
-            cmd_list = [f"GRAB {grab}", f"DROP {drop}"]
             await self.send_command({"cmd_list": cmd_list})
             
             # Wait for stop_listen acknowledgment
-            response = await self.wait_for_response()
-            if not response:
-                logger.error(f" Failed to get stop_listen for pair {pair_num}")
+            response = await self.wait_for_response(expected_keys=['cmd'])
+            if not response or response.get("cmd") != "stop_listen":
+                logger.error(f"Expected stop_listen but got: {response}")
                 return False
             
             # Wait for start_listen when execution completes
-            response = await self.wait_for_response(timeout=120.0)
-            if not response:
-                logger.error(f" Failed to get start_listen for pair {pair_num}")
-                return False
+            response = await self.wait_for_response(timeout=120.0, expected_keys=['cmd'])
+            if not response or response.get("cmd") != "start_listen":
+                logger.error(f"Expected start_listen but got: {response}")
             
-            # Track which box the object was dropped into
-            if grabbed_obj:
-                box_id = self.get_box_id(drop)
-                logger.info(f" Grabbed object: {grabbed_obj}, drop coords: {drop}, box_id: {box_id}")
-                if box_id is not None:
-                    self.add_to_box(box_id, grabbed_obj)
-                    # Find the label for logging
-                    box_label = next((box["label"] for box in self.drop_points if box["id"] == box_id), f"BOX{box_id}")
-                    logger.info(f" Added {grabbed_obj['color_name']} {grabbed_obj['class_name']} to {box_label}")
-                    logger.info(f" Box contents now: {self.box_contents}")
-                else:
-                    logger.warning(f" Could not find box for drop coords: {drop}")
-            
-            # Update objects list after each operation
-            if self.broadcast_callback:
-                objects = await self.get_objects()
+            # Broadcast completion and refresh objects
+            if response and self.broadcast_callback:
+                # Get fresh object list (without lock since we're already in command_lock)
+                objects = await self._get_objects_unlocked(retry_count=2)
                 await self.broadcast_callback({
                     "type": "objects",
                     "objects": objects
                 })
-                # Send updated box contents
                 await self.broadcast_callback({
                     "type": "box_contents",
                     "boxes": self.box_contents
                 })
                 await self.broadcast_callback({
                     "type": "system",
-                    "content": f" Completed operation {pair_num}/{total_pairs}"
+                    "content": f"✓ Completed {len(cmd_list)//2} operations"
                 })
             
-            # Small delay for better UI experience
-            await asyncio.sleep(0.5)
-        
-        return True
+            return response is not None
+    
+    async def execute_commands_sequential(self, grab_coords: List[str], drop_coords: List[str]) -> bool:
+        """Execute GRAB & DROP commands one by one, updating UI after each pair"""
+        async with self.command_lock:
+            if not self.connected:
+                logger.error("Robot not connected, cannot execute commands")
+                return False
+            
+            total_pairs = len(grab_coords)
+            
+            # Get fresh object list before starting (unlocked version since we have the lock)
+            await self._get_objects_unlocked(retry_count=2)
+            logger.info(f"Starting sequential execution with {len(self.current_objects)} objects available")
+            
+            for i, (grab, drop) in enumerate(zip(grab_coords, drop_coords)):
+                pair_num = i + 1
+                
+                # Find which object is being grabbed (must do this BEFORE execution)
+                grabbed_obj = None
+                for obj in self.current_objects:
+                    obj_coords = f"{obj['x']} {obj['y']} {obj['z']}"
+                    logger.info(f"  Comparing: obj_coords='{obj_coords}' with grab='{grab}'")
+                    if obj_coords == grab:
+                        grabbed_obj = obj
+                        logger.info(f"   Found matching object: {obj}")
+                        break
+                
+                if not grabbed_obj:
+                    logger.warning(f"Could not find object at coordinates: {grab}")
+                
+                # Broadcast which pair we're executing (robot is starting)
+                if self.broadcast_callback:
+                    await self.broadcast_callback({
+                        "type": "system",
+                        "content": f"⏳ Executing operation {pair_num}/{total_pairs}..."
+                    })
+                    await self.broadcast_callback({
+                        "type": "command",
+                        "content": f"GRAB {grab}",
+                        "index": pair_num * 2 - 1,
+                        "total": total_pairs * 2
+                    })
+                    await self.broadcast_callback({
+                        "type": "command", 
+                        "content": f"DROP {drop}",
+                        "index": pair_num * 2,
+                        "total": total_pairs * 2
+                    })
+                
+                # Execute this pair
+                cmd_list = [f"GRAB {grab}", f"DROP {drop}"]
+                await self.send_command({"cmd_list": cmd_list})
+                
+                # Wait for stop_listen acknowledgment (robot received commands)
+                response = await self.wait_for_response(expected_keys=['cmd'])
+                if not response:
+                    logger.error(f"Failed to get stop_listen for pair {pair_num}")
+                    return False
+                if response.get("cmd") != "stop_listen":
+                    logger.warning(f"Expected stop_listen but got: {response}")
+                logger.info(f"Robot acknowledged commands for pair {pair_num}: {response}")
+                
+                # Wait for start_listen when execution completes (robot finished moving)
+                response = await self.wait_for_response(timeout=120.0, expected_keys=['cmd'])
+                if not response:
+                    logger.error(f"Failed to get start_listen for pair {pair_num}")
+                    return False
+                if response.get("cmd") != "start_listen":
+                    logger.warning(f"Expected start_listen but got: {response}")
+                logger.info(f"Robot completed execution for pair {pair_num}, response: {response}")
+                
+                # Robot confirmed completion - trust it and update based on command
+                # Remove the grabbed object from current_objects list
+                if grabbed_obj:
+                    # Remove from current objects
+                    self.current_objects = [obj for obj in self.current_objects 
+                                           if not (obj['x'] == grabbed_obj['x'] and 
+                                                  obj['y'] == grabbed_obj['y'] and 
+                                                  obj['z'] == grabbed_obj['z'])]
+                    logger.info(f"Removed object from list: {grabbed_obj['color_name']} {grabbed_obj['class_name']}")
+                    
+                    # Add to box contents
+                    box_id = self.get_box_id(drop)
+                    if box_id is not None:
+                        self.add_to_box(box_id, grabbed_obj)
+                        box_label = next((box["label"] for box in self.drop_points if box["id"] == box_id), f"BOX{box_id}")
+                        logger.info(f"✓ Added {grabbed_obj['color_name']} {grabbed_obj['class_name']} to {box_label}")
+                    else:
+                        logger.warning(f"Could not find box for drop coords: {drop}")
+                
+                # Update UI with current state (no camera query needed)
+                if self.broadcast_callback:
+                    logger.info(f"Broadcasting UI updates for pair {pair_num}: {len(self.current_objects)} objects remaining, box_contents: {self.box_contents}")
+                    await self.broadcast_callback({
+                        "type": "objects",
+                        "objects": self.current_objects
+                    })
+                    await self.broadcast_callback({
+                        "type": "box_contents",
+                        "boxes": self.box_contents
+                    })
+                    await self.broadcast_callback({
+                        "type": "system",
+                        "content": f"✓ Completed operation {pair_num}/{total_pairs}"
+                    })
+                    logger.info(f"UI broadcasts sent for pair {pair_num}")
+                
+                # Small delay for better UI experience
+                await asyncio.sleep(0.3)
+            
+            # Final UI update after all operations complete
+            if self.broadcast_callback:
+                await self.broadcast_callback({
+                    "type": "system",
+                    "content": f"✓ All {total_pairs} operations completed successfully"
+                })
+                # Send final state (using cached current_objects, not querying camera)
+                await self.broadcast_callback({
+                    "type": "objects",
+                    "objects": self.current_objects
+                })
+                await self.broadcast_callback({
+                    "type": "box_contents",
+                    "boxes": self.box_contents
+                })
+                logger.info(f"Final state: {len(self.current_objects)} objects remaining in scene")
+            
+            return True
 
 
 # Global instance

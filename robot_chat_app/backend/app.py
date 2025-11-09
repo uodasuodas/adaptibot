@@ -30,9 +30,11 @@ agent = None
 # Callback for broadcasting messages to all clients
 async def broadcast_message(message: dict):
     """Broadcast message to all connected WebSocket clients"""
+    logger.info(f"Broadcasting to {len(active_connections)} clients: type={message.get('type')}")
     for connection in active_connections:
         try:
             await connection.send_json(message)
+            logger.debug(f"Sent to client: {message.get('type')}")
         except Exception as e:
             logger.error(f"Error broadcasting to client: {e}")
 
@@ -100,7 +102,7 @@ async def websocket_endpoint(websocket: WebSocket):
         if robot_server.connected:
             try:
                 await robot_server.initialize_session()
-                objects = await robot_server.get_objects()
+                objects = await robot_server.get_objects(retry_count=2)
                 await websocket.send_json({
                     "type": "objects",
                     "objects": objects
@@ -141,13 +143,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         "content": response
                     })
                     
-                    # Update objects display
-                    if robot_server.connected:
-                        objects = robot_server.current_objects
-                        await websocket.send_json({
-                            "type": "objects",
-                            "objects": objects
-                        })
+                    # Note: No need to refresh objects here since execute_commands_sequential()
+                    # already sends comprehensive UI updates during command execution
                     
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
@@ -160,14 +157,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Refresh object list from robot
                 if robot_server.connected:
                     try:
-                        objects = await robot_server.get_objects()
+                        objects = await robot_server.get_objects(retry_count=2)
                         await websocket.send_json({
                             "type": "objects",
                             "objects": objects
                         })
                         await websocket.send_json({
                             "type": "system",
-                            "content": f"Refreshed: {len(objects)} objects detected"
+                            "content": f"✓ Refreshed: {len(objects)} objects detected"
                         })
                     except Exception as e:
                         logger.error(f"Error refreshing objects: {e}")
